@@ -77,7 +77,7 @@ public class Game {
     //Logical updates
     public void update() {
         //Spawning balls
-        if (gp.mouseLeftPressed && gp.mouseX != 0 && updates % 1 == 0) {
+        if (gp.mouseLeftPressed && gp.mouseX != 0) {
             //Random radius based on radiusMin and radiusMax
             double radius = Math.random()*(radiusMax-radiusMin)+radiusMin;
             //Spawn-distribution: maximum offset in both x and y individually. This avoids most of balls spawning on top of each other, which can be buggy
