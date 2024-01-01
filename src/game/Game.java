@@ -1,160 +1,181 @@
 package game;
 
+//Necessary for input
 import main.GamePanel;
 
-import java.awt.image.BufferedImage;
+//Graphics
 import java.awt.Graphics2D;
-import java.io.IOException;
 import java.awt.Color;
 
+//ArrayList used to store the indefinite number of balls
 import java.util.ArrayList;
 
-import javax.imageio.ImageIO;
-
 public class Game {
+    //Allows access to input. Also GamePanel runs the Game class
     private GamePanel gp;
 
-    private long updates = 0; //Total times update() has been run
+    //Total times update() has been run
+    private long updates = 0;
 
+    //How zoomed in, with greater values meaning greater zoom
     double scale = 10.0;
+    //1.0 = full speed, decreasing slows time and makes the collisions less glitchy (>1 and it often just breaks)
+    double deltaTime = 0.1;
+    //Too weak gravity and it feels to slow, too much as the simulation goes too fast or just breaks
+    double gravitationalConstant = 0.25;
+    //Reccomended to have gravity so that the balls don't just spread out and do nothing. It can be fun to turn off gravity after a cluster has formed
+    boolean gravityOn = true;
+    //Balls bounce of the borders of the window, losing 10% speed each time
+    boolean bordersOn = true;
+    //Speed decreases for all balls by (naturalDeceleration*100)% every updates. 0.001 (0.1%) works well
+    double naturalDeceleration = 0.000;
+    //Instead of the user setting the center of gravity, it is found based on the position and masses of balls
+    boolean realisticGravity = false;
+    //Very inaccurate, but (subjectively) more fun gravity
+    boolean funGravity = false;
+    //Radius range
+    double radiusMin = 0.3;
+    double radiusMax = 1.0;
+    //Maximum offset in both x and y individually when spawning balls. This avoids most of balls being created on top of each other, which can be buggy
+    double spawnDistribution = 8.0;
+    //Starting center of gravity
+    Vec2 center = new Vec2(800/scale, 450/scale);
 
-    //A BufferedImage which does not store anything yet
-    public BufferedImage particleImage = null;
-    ArrayList<Particle> particles = new ArrayList<Particle>();
+    ArrayList<Ball> balls = new ArrayList<Ball>();
 
+    //gp, the GamePanel object is used to access the mouse and keyboard
     public Game(GamePanel gp) {
         this.gp = gp;
-        
-        //Loads the chest image from the res folder to image
-        try {
-            particleImage = ImageIO.read(getClass().getResourceAsStream("/res/tennis_ball.png"));
-        } catch (IOException e) {
-            //Prints the error and the stack trace if it fails to load the image from res
-            e.printStackTrace();
-        }
     }
 
+    //Sums and returns the mass of the balls all together
     public double sumMass() {
         double r = 0.0;
-        for (Particle particle : particles) {
-            r += particle.mass;
+        for (Ball ball : balls) {
+            r += ball.mass;
         }
         return r;
     }
 
+    //Find the point that all balls gravitate towards
+    //This is not very accurate, but is a lot more efficient and works well once it has formed into a cluster
     public Vec2 findGravitationalCenter() {
+        //Vector to be returned
         Vec2 r = new Vec2(0, 0);
+
         double totalMass = sumMass();
-        for (Particle particle : particles) {
-            r = r.add(particle.position.scalarMultiply(particle.mass));
+
+        //Sum the positions with the mass as a scalar (more mass = greater impact)
+        for (Ball ball : balls) {
+            r = r.add(ball.position.scalarMultiply(ball.mass));
         }
+
+        //Divide by total mass to find weighted average, AKA our approximation of a universal center
         return r.scalarMultiply(1/totalMass);
     }
 
-    double deltaTime = 0.1;
-    double gravitationalConstant = 0.25;
-    boolean gravityOn = true;
-    boolean bordersOn = true;
-    double naturalDeceleration = 0.000;
-    boolean realisticGravity = false;
-    boolean funGravity = false;
-    double radiusMin = 0.3;
-    double radiusMax = 1.0;
-    double spawnDistribution = 8.0;
-    Vec2 center = new Vec2(800/scale, 450/scale);
+    //Logical updates
     public void update() {
-
+        //Spawning balls
         if (gp.mouseLeftPressed && gp.mouseX != 0 && updates % 1 == 0) {
+            //Random radius based on radiusMin and radiusMax
             double radius = Math.random()*(radiusMax-radiusMin)+radiusMin;
-            particles.add(new Particle(new Vec2(gp.mouseX/scale-spawnDistribution+2*Math.random()*spawnDistribution, gp.mouseY/scale-spawnDistribution+2*Math.random()*spawnDistribution), new Vec2(0.0, 0.0), radius, Math.PI*radius*radius));
+            //Spawn-distribution: maximum offset in both x and y individually. This avoids most of balls spawning on top of each other, which can be buggy
+            balls.add(new Ball(new Vec2(gp.mouseX/scale-spawnDistribution+2*Math.random()*spawnDistribution, gp.mouseY/scale-spawnDistribution+2*Math.random()*spawnDistribution), new Vec2(0.0, 0.0), radius, Math.PI*radius*radius));
         }
-        if (gp.mouseRightPressed) {
-            if (!realisticGravity)
-                center = new Vec2(gp.mouseX/scale, gp.mouseY/scale);
-        }
-        if (gp.keyH.spacePressed) {
+        //Changing gravity
+        if (gp.mouseRightPressed && !realisticGravity)
+            center = new Vec2(gp.mouseX/scale, gp.mouseY/scale);
+        //Holding space = keeping gravity off
+        if (gp.keyH.spacePressed)
             gravityOn = false;
-        }
-        else {
+        //Gravity on by default/when space is not pressed
+        else
             gravityOn = true;
-        }
 
-        if (realisticGravity && particles.size() > 0)//updates % (int) (Math.pow(particles.size(), 0.5)) == 0)
+        //Finding the gravitional center. This is just a heuristic; Newton's law of universal gravitation is too slow
+        if (realisticGravity && balls.size() > 0)//updates % (int) (Math.pow(balls.size(), 0.5)) == 0) //<-- this skips finding the center most updates to be more efficient
             center = findGravitationalCenter();
 
-        for (Particle particle : particles) {
-            if (particle.position.isNaN()) {
-                particles.clear();
+        //Updating ball. None of this requires considering other balls
+        for (Ball ball : balls) {
+            if (ball.position.isNaN()) {
+                balls.clear();
                 break;
             }
 
             //Gravity
             if (gravityOn) {
-                Vec2 fromCenter = center.subtract(particle.position).normalize();
-                double distanceFromCenter = center.subtract(particle.position).magnitude();
+                Vec2 fromCenter = center.subtract(ball.position).normalize();
+                double distanceFromCenter = center.subtract(ball.position).magnitude();
+
+                //Silly gravity that is more fun IMO
                 if (funGravity) {
                     double gravityScalar = 1/Math.pow(distanceFromCenter+1, 0.5);
-                    particle.velocity = particle.velocity.add(fromCenter.scalarMultiply(gravitationalConstant/10.0*gravityScalar));
+                    ball.velocity = ball.velocity.add(fromCenter.scalarMultiply(gravitationalConstant/10.0*gravityScalar));
                 }
+                //Realistic gravity, but a bit softened so that it doesn't go crazy as distanceFromCenter approaches 0
                 else {
                     double gravityScalar = 1/Math.pow(distanceFromCenter+1, 2);
-                    particle.velocity = particle.velocity.add(fromCenter.scalarMultiply(gravitationalConstant*gravityScalar));
+                    ball.velocity = ball.velocity.add(fromCenter.scalarMultiply(gravitationalConstant*gravityScalar));
                 }
             }
             
-            particle.position.x += particle.velocity.x*deltaTime;
-            particle.position.y += particle.velocity.y*deltaTime;
-
+            ball.position.x += ball.velocity.x*deltaTime;
+            ball.position.y += ball.velocity.y*deltaTime;
+            
+            //Border collisions
             if (bordersOn) {
-                if (particle.position.x-particle.radius <= 0) {
-                    particle.position.x = particle.radius;
-                    particle.velocity.x *= -0.9; 
+                //Up
+                if (ball.position.y-ball.radius <= 0) {
+                    ball.position.y = ball.radius;
+                    ball.velocity.y *= -0.9; 
                 }
-                else if (particle.position.x+particle.radius >= 1600/scale) {
-                    particle.position.x = 1600/scale-particle.radius;
-                    particle.velocity.x *= -0.9; 
+                //Down
+                else if (ball.position.y+ball.radius >= 900/scale) {
+                    ball.position.y = 900/scale-ball.radius;
+                    ball.velocity.y *= -0.9; 
                 }
-                if (particle.position.y-particle.radius <= 0) {
-                    particle.position.y = particle.radius;
-                    particle.velocity.y *= -0.9; 
+                //Left
+                if (ball.position.x-ball.radius <= 0) {
+                    ball.position.x = ball.radius;
+                    ball.velocity.x *= -0.9; 
                 }
-                else if (particle.position.y+particle.radius >= 900/scale) {
-                    particle.position.y = 900/scale-particle.radius;
-                    particle.velocity.y *= -0.9; 
+                //Right
+                else if (ball.position.x+ball.radius >= 1600/scale) {
+                    ball.position.x = 1600/scale-ball.radius;
+                    ball.velocity.x *= -0.9; 
                 }
             }
 
-            //Decelerating over time
-            particle.velocity = particle.velocity.scalarMultiply(1.0-naturalDeceleration);
+            //Decelerating over time (does nothing if nautralDeceleration is 0)
+            ball.velocity = ball.velocity.scalarMultiply(1.0-naturalDeceleration);
         }
 
-        for (int i = 0; i < particles.size(); i++) {
-            Particle particle = particles.get(i);
+        //Collision checks
+        for (int i = 0; i < balls.size(); i++) {
+            Ball ball = balls.get(i);
 
-            for (int o = i+1; o < particles.size(); o++) {
-                Particle other = particles.get(o);
-                if (particle.getDistance(other) < particle.radius+other.radius) {
-                    Vec2 difference = particle.position.subtract(other.position);
+            //Starts at i+1 so as to not repeat checks
+            for (int o = i+1; o < balls.size(); o++) {
+                Ball other = balls.get(o);
+                //If overlapping
+                if (ball.getDistance(other) < ball.radius+other.radius) {
+                    //Vector representing difference between ball centers
+                    Vec2 difference = ball.position.subtract(other.position);
+
+                    //Exception if position is the same
                     if (difference.magnitude() == 0.0)
                         difference = new Vec2(0.01, 0.01);
-                    particle.velocity = particle.velocity.add(difference.scalarMultiply(((particle.radius+other.radius)-difference.magnitude())*1.0/2.0));
-                    other.velocity = other.velocity.add(difference.scalarMultiply(((particle.radius+other.radius)-difference.magnitude())*-1.0/2.0));
-                    // if (particle.mass >= other.mass) {
-                    //     particle.velocity = particle.velocity.add(difference.scalarMultiply(((particle.radius+other.radius)-difference.magnitude())*1.0/(particle.mass/other.mass)));
-                    //     other.velocity = other.velocity.add(difference.scalarMultiply(((particle.radius+other.radius)-difference.magnitude())*-1.0));
-                    // }
-                    // else {
-                    //     particle.velocity = particle.velocity.add(difference.scalarMultiply(((particle.radius+other.radius)-difference.magnitude())*1.0));
-                    //     other.velocity = other.velocity.add(difference.scalarMultiply(((particle.radius+other.radius)-difference.magnitude())*-1.0/(other.mass/particle.mass)));
-                    // }
-                    // double dotProduct = Math.abs(particle.velocity.dotProduct(other.velocity));
-                    // double convertedDot = 1.0-dotProduct/(particle.velocity.abs().add(other.velocity.abs()).magnitude());
-                    //particle.velocity = particle.velocity.add(other.velocity.scalarMultiply(convertedDot));
-                    //other.velocity = other.velocity.add(particle.velocity.scalarMultiply(convertedDot));
-                    //particle.velocity = particle.velocity.add(difference.scalarMultiply(((particle.radius+other.radius)-difference.magnitude())*1.0/particle.mass*other.mass));
-                    //other.velocity = other.velocity.add(difference.scalarMultiply(((particle.radius+other.radius)-difference.magnitude())*-1.0/other.mass*particle.mass));
-                    particle.position = particle.position.add(difference.scalarMultiply(((particle.radius+other.radius)-difference.magnitude())/2.0));
-                    other.position = other.position.subtract(difference.scalarMultiply(((particle.radius+other.radius)-difference.magnitude())/2.0));
+
+                    //Updating velocity (this is not real physics btw)
+                    //TODO make mass play a rôle
+                    ball.velocity = ball.velocity.add(difference.scalarMultiply(((ball.radius+other.radius)-difference.magnitude())*1.0/2.0));
+                    other.velocity = other.velocity.add(difference.scalarMultiply(((ball.radius+other.radius)-difference.magnitude())*-1.0/2.0));
+                    
+                    //Updating position
+                    ball.position = ball.position.add(difference.scalarMultiply(((ball.radius+other.radius)-difference.magnitude())/2.0));
+                    other.position = other.position.subtract(difference.scalarMultiply(((ball.radius+other.radius)-difference.magnitude())/2.0));
                 }
             }
         }
@@ -163,17 +184,24 @@ public class Game {
         updates++;
     }
     
+    //Graphical updates
+    //GS = graphics scaling. Works assuming the window dimensions are 16:9
     public void draw(Graphics2D g2, double GS) {
+        //Background
         g2.setColor(new Color(100, 100, 100));
         g2.fillRect(0, 0, (int) (1600*GS), (int) (900*GS));
-        for (int i = 0; i < particles.size(); i++) {
-            Particle particle = particles.get(i);
-            //g2.setColor(new Color(255*i, 255-255*i, 0));
-            double convertedRadius = (particle.radius-radiusMin)/(radiusMax-radiusMin);
+
+        //Drawing each ball
+        for (int i = 0; i < balls.size(); i++) {
+            Ball ball = balls.get(i);
+
+            //Color based on radius
+            //Converted radius: how large it is compared to the other possible radiuses
+            double convertedRadius = (ball.radius-radiusMin)/(radiusMax-radiusMin);
+            //Shifts from orange to purple to blue as radius increases
             g2.setColor(new Color((int) (255-255*convertedRadius), (int) (100-100*convertedRadius), (int) (255*convertedRadius*convertedRadius)));
-            g2.fillOval((int) ((particle.position.x-particle.radius)*GS*scale), (int) ((particle.position.y-particle.radius)*GS*scale), (int) (particle.radius*2*GS*scale), (int) (particle.radius*2*GS*scale));
-            //g2.drawImage(particleImage, (int) ((particle.position.x-particle.radius)*GS*scale), (int) ((particle.position.y-particle.radius)*GS*scale), (int) (particle.radius*2*GS*scale), (int) (particle.radius*2*GS*scale), null);
-            //g2.drawLine((int) ((particle.position.x)*GS*scale), (int) ((particle.position.y)*GS*scale), (int) ((particle.position.x+particle.velocity.x*10)*GS*scale), (int) ((particle.position.y+particle.velocity.y*10)*GS*scale));
+
+            g2.fillOval((int) ((ball.position.x-ball.radius)*GS*scale), (int) ((ball.position.y-ball.radius)*GS*scale), (int) (ball.radius*2*GS*scale), (int) (ball.radius*2*GS*scale));
         }
     }
 }
