@@ -24,7 +24,7 @@ public class Main{
         //Setting properties of window
         window.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);  //Closes application when X is pressed
         window.setResizable(false);                             //Can't be manually resized
-        window.setTitle("My Java Application");                 //Window title
+        window.setTitle("Ball Fun");                            //Window title
         window.setFocusTraversalKeysEnabled(false);             //Disables certain keys, like tab, from having special use
 
         //Adding gamePanel, which actually controls the application
